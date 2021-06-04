@@ -12,8 +12,6 @@
 
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
-
-
 """Checks the consistency between the zotfile-managed directory and the database"""
 
 import argparse
@@ -24,12 +22,15 @@ import re
 import sqlite3
 import unicodedata
 
+from rich import print
+
 
 def get_db_set(db, d):
     conn = sqlite3.connect(db)
 
     db_c = conn.execute(
-        'select path from itemAttachments where linkMode = 2 or linkMode = 3 and contentType = "application/pdf"')
+        'select path from itemAttachments where '
+        'linkMode = 2 or linkMode = 3 and contentType = "application/pdf"')
     db_d = db_c.fetchall()
 
     db_l = []
@@ -39,18 +40,20 @@ def get_db_set(db, d):
             item = db_d[i][0]
             if not item.lower().endswith(".pdf"):
                 continue
-            if item.count('attachments:') > 0: # relative path
+            if item.count('attachments:') > 0:  # relative path
                 item = item.replace('attachments:', "")
-            else: # absolute path
+            else:  # absolute path
                 item = str(pathlib.Path(item).relative_to(d))
-        except:
+        except (OSError, ValueError, TypeError):
             # file is not in zotfile directory
             continue
 
         db_l.append(unicodedata.normalize("NFD", item))
 
     db_set = set(db_l)
+
     return db_set
+
 
 def get_dir_set(d):
     rule = re.compile(fnmatch.translate("*.pdf"), re.IGNORECASE)
@@ -62,7 +65,9 @@ def get_dir_set(d):
     fs = [str(pathlib.Path(f).relative_to(d)) for f in matches]
     fs = [unicodedata.normalize("NFD", x) for x in fs]
     d_set = set(fs)
+
     return d_set
+
 
 def remove_empty_dirs(d):
     for root, dirnames, _filenames in os.walk(d, topdown=False):
@@ -72,32 +77,41 @@ def remove_empty_dirs(d):
             except OSError:
                 continue
 
+
 def main(db, d, clean=False):
     db_set = get_db_set(db, d)
     dir_set = get_dir_set(d)
 
+    db_set = {pathlib.Path(x).as_posix() for x in db_set}
+    dir_set = {pathlib.Path(x).as_posix() for x in dir_set}
+
     db_not_dir = db_set.difference(dir_set)
     dir_not_db = dir_set.difference(db_set)
 
-    print(f"There were {len(db_not_dir)}/{len(db_set)} files in DB but not in zotfile directory:")
-    for f in sorted(db_not_dir):
-        print("   " + f)
-    print(f"\nThere were {len(dir_not_db)}/{len(dir_set)} files in zotfile directory but not in DB:")
-    for f in sorted(dir_not_db):
-        print("   " + f)
+    print(f"There were {len(db_not_dir)}/{len(db_set)} "
+          f"files in DB but not in zotfile directory:")
+    print(sorted(db_not_dir))
+
+    print(f"\nThere were {len(dir_not_db)}/{len(dir_set)} "
+          f"files in zotfile directory but not in DB:")
+    print(sorted(dir_not_db))
 
     if clean and len(dir_not_db) > 0:
         for f in dir_not_db:
             os.remove(os.path.join(d, f))
         remove_empty_dirs(d)
-        print(f"\n{len(dir_not_db)} files and empty directories has been removed")
+        print(f"\n{len(dir_not_db)} files and "
+              f"empty directories has been removed")
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="zotfile directory consistency checker")
+    parser = argparse.ArgumentParser(
+        description="zotfile directory consistency checker")
     parser.add_argument("zotero_sqlite", help="path-to-zotero/zotero.sqlite")
     parser.add_argument("zotfile_directory", help="zotfile directory")
-    parser.add_argument("-c", "--clean", action="store_true",
+    parser.add_argument("-c",
+                        "--clean",
+                        action="store_true",
                         help="remove files in zotfile directory but not in DB")
     args = parser.parse_args()
     main(args.zotero_sqlite, args.zotfile_directory, args.clean)
