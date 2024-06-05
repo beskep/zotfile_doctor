@@ -1,0 +1,9 @@
+[tool.ruff]
+preview = true
+output-format = 'concise'
+
+[tool.ruff.format]
+quote-style = 'single'
+
+[tool.ruff.lint]
+select = ['F', 'E', 'W', 'C90', 'I', 'N', 'UP', 'B', 'PTH', 'PL']
