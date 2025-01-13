@@ -14,20 +14,16 @@
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 """Checks the consistency between the zotfile-managed directory and the database."""
 
-import argparse
-import os
 import sqlite3
 import unicodedata
 from collections.abc import Iterable
 from pathlib import Path
 
-try:
-    from rich import print
-except ImportError:
-    pass
+import cyclopts
+import rich
 
 
-def iter_db(db: str | Path, directory: str | Path) -> Iterable[str]:
+def _iter_db(db: str | Path, directory: str | Path) -> Iterable[str]:
     conn = sqlite3.connect(db)
     db_c = conn.execute(
         'select path from itemAttachments where '
@@ -52,74 +48,63 @@ def iter_db(db: str | Path, directory: str | Path) -> Iterable[str]:
         yield unicodedata.normalize('NFD', item)
 
 
-def iter_dir(directory: str | Path) -> Iterable[str]:
-    for path in Path(directory).rglob('*.pdf'):
+def _iter_dir(directory: Path) -> Iterable[str]:
+    for path in directory.rglob('*.pdf'):
         yield unicodedata.normalize('NFD', path.relative_to(directory).as_posix())
 
 
-def remove_empty_dirs(directory):
-    d: str
-    for root, dirs, _file in os.walk(directory, topdown=False):
-        for d in dirs:
-            try:
-                (Path(root) / d).rmdir()
-            except OSError:
-                continue
+app = cyclopts.App(config=cyclopts.config.Toml('config.toml'))
 
 
-def main(db: str | Path, directory: str | Path, *, clean=False):
+@app.default
+def main(db: Path, directory: Path, *, clean: bool = False) -> None:
+    """
+    Zotfile directory consistency checker.
+
+    Parameters
+    ----------
+    db : Path
+        zotero.sqlite path
+    directory : Path
+        Zotfile directory
+    clean : bool, optional
+        Remove files in zotfile directory but not in DB.
+    """
     directory = Path(directory)
+    console = rich.get_console()
 
-    _db = {Path(x).as_posix() for x in iter_db(db, directory)}
-    _dir = set(iter_dir(directory))
+    db_files = {Path(x).as_posix() for x in _iter_db(db, directory)}
+    dir_files = set(_iter_dir(directory))
 
-    db_not_dir = sorted(_db - _dir)
-    dir_not_db = sorted(_dir - _db)
+    db_not_dir = sorted(db_files - dir_files)
+    dir_not_db = sorted(dir_files - db_files)
 
-    print(
-        f'There were {len(db_not_dir)}/{len(_db)} '
+    console.print(
+        f'There were {len(db_not_dir)}/{len(db_files)} '
         'files in DB but not in zotfile directory:'
     )
-    for file in db_not_dir:
-        print(f'  - "{file}"')
+    console.print(db_not_dir)
 
-    print(
-        f'\nThere were {len(dir_not_db)}/{len(_dir)} '
+    console.print(
+        f'\nThere were {len(dir_not_db)}/{len(dir_files)} '
         'files in zotfile directory but not in DB:'
     )
-    for file in dir_not_db:
-        print(f'  - "{file}"')
+    console.print(dir_not_db)
 
     if not (clean and len(dir_not_db) > 0):
         return
 
-    print()
+    console.print()
     for file in dir_not_db:
         p = directory / file
+
         try:
             p.unlink()
         except OSError:
-            print(f'Failed to unlink "{file}"')
+            console.print(f'Failed to unlink "{file}"')
         else:
-            print(f'Unlinked "{file}"')
+            console.print(f'Unlinked "{file}"')
 
 
 if __name__ == '__main__':
-    parser = argparse.ArgumentParser(
-        description='zotfile directory consistency checker'
-    )
-    parser.add_argument('zotero_sqlite', help='path-to-zotero/zotero.sqlite')
-    parser.add_argument('zotfile_directory', help='zotfile directory')
-    parser.add_argument(
-        '-c',
-        '--clean',
-        action='store_true',
-        help='remove files in zotfile directory but not in DB',
-    )
-    args = parser.parse_args()
-
-    main(
-        db=args.zotero_sqlite,
-        directory=args.zotfile_directory,
-        clean=args.clean,
-    )
+    app()
